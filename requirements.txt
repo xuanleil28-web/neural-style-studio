@@ -1,0 +1,8 @@
+# Install PyTorch for your platform first: https://pytorch.org/get-started/locally/
+# CPU-only example:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+torchvision>=0.15
+streamlit>=1.45
+pillow>=9.0
+pandas>=1.5

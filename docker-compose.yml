@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - torch-cache:/home/appuser/.cache/torch
+    restart: unless-stopped
+
+volumes:
+  torch-cache:

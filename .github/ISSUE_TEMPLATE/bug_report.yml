@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible problem with the app, CLI, or Docker setup
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please run `python scripts/check_env.py` and include its output.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the app with ...
+        2. Upload ...
+        3. Set sliders to ...
+        4. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, PyTorch, Streamlit, GPU, and launch method (local/Docker).
+      placeholder: |
+        OS: Windows 11
+        Python: 3.12.4
+        torch: 2.6.0+cu124
+        streamlit: 1.45.1
+        GPU: NVIDIA RTX 4060
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output / logs
+      description: Paste the traceback or terminal output. Remove any private paths if needed.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues before opening this report.
+          required: true
+        - label: I can reproduce this with the current `main` branch.
+          required: true

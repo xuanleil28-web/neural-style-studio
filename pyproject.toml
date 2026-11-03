@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neural-style-studio"
+version = "0.1.0"
+description = "Interactive neural style transfer with VGG19, Gram matrices, and L-BFGS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Neural Style Studio contributors" }]
+keywords = ["neural-style-transfer", "style-transfer", "vgg19", "pytorch", "streamlit"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "streamlit>=1.45",
+    "pillow>=9.0",
+    "pandas>=1.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.6"]
+
+[tool.setuptools]
+py-modules = ["style_transfer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: loads VGG19 and runs a real optimization step (set RUN_ENGINE_TESTS=1 to run)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
