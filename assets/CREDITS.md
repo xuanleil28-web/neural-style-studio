@@ -18,4 +18,6 @@ for demonstrative style transfer.
 ## Generated documentation images
 
 `docs/images/*` are outputs of this program using the two assets above.
-They are provided under the same terms as the source images (public domain).
+`docs/images/video_demo.gif` is a stylized synthetic pan generated from the same
+astronaut image. These derived files are provided under the same terms as the source
+images (public domain).

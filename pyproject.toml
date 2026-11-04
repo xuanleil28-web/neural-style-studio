@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neural-style-studio"
-version = "0.1.0"
-description = "Interactive neural style transfer with VGG19, Gram matrices, and L-BFGS"
+version = "0.2.0"
+description = "Interactive neural style transfer for images and short videos with VGG19, Gram matrices, optical flow, and L-BFGS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -26,6 +26,9 @@ dependencies = [
     "streamlit>=1.45",
     "pillow>=9.0",
     "pandas>=1.5",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "imageio-ffmpeg>=0.5",
 ]
 
 [project.optional-dependencies]

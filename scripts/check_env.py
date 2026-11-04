@@ -33,6 +33,20 @@ def main() -> int:
     except Exception as exc:  # pragma: no cover - diagnostic script
         print(f"Streamlit:  NOT AVAILABLE ({exc})")
 
+    try:
+        import cv2
+
+        print(f"OpenCV:     {cv2.__version__}")
+    except Exception as exc:  # pragma: no cover - diagnostic script
+        print(f"OpenCV:     NOT AVAILABLE ({exc}) — video mode disabled")
+
+    try:
+        import imageio_ffmpeg
+
+        print(f"ffmpeg:     {imageio_ffmpeg.get_ffmpeg_exe()}")
+    except Exception as exc:  # pragma: no cover - diagnostic script
+        print(f"ffmpeg:     NOT AVAILABLE ({exc}) — H.264 encoding will fall back to mp4v")
+
     checkpoint = Path.home() / ".cache" / "torch" / "hub" / "checkpoints" / "vgg19-dcbb9e9d.pth"
     print(f"VGG19 cache:{checkpoint} ({'found' if checkpoint.exists() else 'missing, will download'})")
 

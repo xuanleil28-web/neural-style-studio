@@ -12,7 +12,9 @@ import streamlit as st
 import torch
 from PIL import Image
 
-from style_transfer import StyleParams, StyleTransferEngine, __version__, open_rgb_image
+from engine_cache import get_engine
+from style_transfer import StyleParams, __version__, open_rgb_image
+from ui_video import render_video_page
 
 APP_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = APP_DIR / "assets"
@@ -309,24 +311,12 @@ def load_demo_image(path: str, modified_at: float) -> Image.Image:
     return open_rgb_image(path)
 
 
-@st.cache_resource(show_spinner=False)
-def get_engine() -> StyleTransferEngine:
-    return StyleTransferEngine()
-
-
 def image_caption(image: Image.Image, is_demo: bool, label: str) -> str:
     source = "内置示例" if is_demo else "已上传"
     return f"{label} · {image.width} × {image.height} px · {source}"
 
 
-def main() -> None:
-    st.set_page_config(
-        page_title="风格迁移工作台",
-        page_icon="🎨",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-    st.markdown(CSS, unsafe_allow_html=True)
+def render_image_page() -> None:
     init_state()
 
     # ---------------- 侧边栏：参数控制 ----------------
@@ -688,6 +678,34 @@ def render_footer() -> None:
         )
     st.caption(f"v{__version__} · 算法来源：StyleTransfer.ipynb · 实现：PyTorch + torchvision + Streamlit · 完全本地运行")
     st.caption("小提示：总损失中风格项通常占主导，其绝对值大小不代表画质，重点看画面效果。")
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="风格迁移工作台",
+        page_icon="🎨",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.markdown(CSS, unsafe_allow_html=True)
+    navigation = st.navigation(
+        [
+            st.Page(
+                render_image_page,
+                title="图片风格化",
+                icon="🖼️",
+                url_path="image",
+                default=True,
+            ),
+            st.Page(
+                render_video_page,
+                title="视频风格化",
+                icon="🎬",
+                url_path="video",
+            ),
+        ]
+    )
+    navigation.run()
 
 
 if __name__ == "__main__":

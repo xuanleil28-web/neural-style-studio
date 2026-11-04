@@ -7,7 +7,7 @@ textColor = "#23212B"
 
 [server]
 address = "127.0.0.1"
-maxUploadSize = 50
+maxUploadSize = 200
 
 [browser]
 gatherUsageStats = false

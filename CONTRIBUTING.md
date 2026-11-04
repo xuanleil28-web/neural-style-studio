@@ -34,7 +34,7 @@ ruff check .
 ```
 
 The default test suite is fast and does not download model weights. To run the real
-engine smoke test (loads VGG19, one optimization round):
+engine smoke tests (load VGG19; one image round and a short optical-flow video):
 
 ```bash
 # Windows PowerShell

@@ -7,9 +7,9 @@
 
 [English README](README.md)
 
-一个可交互、可复现的**神经风格迁移**小程序：上传内容图和风格图，拖动滑块调整色彩与笔触，
-生成风格化图片并下载。算法基于 VGG19、Gram 矩阵和 L-BFGS，从课程 notebook 整理为独立引擎 +
-Web 界面，方便其他人直接运行、修改和二次开发。
+一个可交互、可复现的**图片 / 短视频神经风格迁移**程序：上传内容图和风格图，拖动滑块调整色彩与笔触；
+视频模式额外使用 Farneback 光流和前后向一致性掩码，把上一帧笔触对齐到当前帧，并通过时间一致性损失减少闪烁。
+算法基于 VGG19、Gram 矩阵和 L-BFGS，从课程 notebook 整理为独立引擎 + Web 界面，方便其他人直接运行、修改和二次开发。
 
 ![内容图、风格图与结果](docs/images/example_triptych.png)
 
@@ -18,13 +18,16 @@ Web 界面，方便其他人直接运行、修改和二次开发。
 
 ## 特性
 
-- 上传内容图 / 风格图，支持 PNG、JPG、JPEG、WEBP、BMP；透明背景自动填充白色。
-- 7 个核心滑块：风格强度、色彩强度、笔触强度、笔触尺度、内容保留、画面平滑、迭代轮数。
+- **图片页**：上传内容图 / 风格图，支持 PNG、JPG、JPEG、WEBP、BMP；透明背景自动填充白色。
+- 7 个核心图片滑块：风格强度、色彩强度、笔触强度、笔触尺度、内容保留、画面平滑、迭代轮数。
 - 4 组预设：梵高·厚涂、色彩冲击、细腻笔触、快速预览。
 - 实时进度、每 5 轮中间预览、损失曲线、参数报告、PNG 下载。
+- **视频页**：上传 MP4/MOV/M4V/AVI/MKV/WEBM，光流对齐 + 时间一致性损失 + 首帧预览。
+- 视频专用参数：首帧轮数、后续帧轮数、时间一致性、最大帧数、视频分辨率、光流精度、遮挡敏感度。
+- H.264 MP4 输出（imageio-ffmpeg），浏览器可直接播放；不可用时回退 OpenCV mp4v。
+- 独立 `StyleTransferEngine`，图片和视频共用同一套 VGG19 / 损失函数。
 - 自动使用 CUDA，无 GPU 时回退 CPU。
-- 独立 `StyleTransferEngine`，可被脚本、测试或其他 UI 复用。
-- 无头 CLI、Docker、单元测试、GitHub Actions CI。
+- 无头图片 CLI、Docker、单元测试、GitHub Actions CI。
 - 代码 MIT 协议，示例素材为公有领域，可安心分发。
 
 ## 快速开始
@@ -33,6 +36,7 @@ Web 界面，方便其他人直接运行、修改和二次开发。
 
 - Python 3.10+
 - PyTorch 2.0+、torchvision 0.15+
+- OpenCV 4.8+、imageio-ffmpeg 0.5+（requirements.txt 会自动安装）
 - 可选：支持 CUDA 的 NVIDIA 显卡
 - 首次运行需下载约 548MB 的 VGG19 权重
 
@@ -84,6 +88,7 @@ docker run --rm -p 8501:8501 \
 ```
 
 Docker 镜像使用 CPU 版 PyTorch，体积更小、无需显卡驱动；GPU 用户建议本地安装 CUDA 版 PyTorch。
+视频模式在 CPU 上会非常慢，建议只用于 360p、少量帧的试验。
 
 ### 命令行
 
@@ -102,13 +107,45 @@ python scripts/stylize.py --device cpu --steps 5 --size 256
 
 查看全部参数：`python scripts/stylize.py --help`。
 
+### 视频模式
+
+在侧边栏切换到 **视频风格化** 页面，上传视频和风格图（不传风格图时使用内置梵高示例），
+先点 **预览首帧** 确认风格，再点 **生成风格化视频**。
+
+![视频风格化示例](docs/images/video_demo.gif)
+
+上面的 GIF 是用同一管线生成的 6 帧、480px 短视频（首帧 35 轮 + 后续 8 轮/帧）。
+输出为 H.264 MP4，可直接在浏览器播放；**暂不保留音轨**。
+
+| 参数 | 范围 / 默认 | 内部参数 | 作用 |
+| --- | --- | --- | --- |
+| 首帧轮数 | 10–50 / 35 | `first_frame_steps` | 首帧建立整体笔触基调 |
+| 后续帧轮数 | 2–15 / 8 | `frame_steps` | 光流热启动后的少量优化轮数 |
+| 时间一致性 | 0–500 / 200 | `temporal_weight` | 越大越稳定，过大可能拖影 |
+| 最大帧数 | 8–120 / 36 | `max_frames` | 只处理前 N 帧，长视频建议分段 |
+| 视频长边 | 360 / 480 / 640 | `video_size` | 输出分辨率，越大越慢 |
+| 光流精度 | fast / balanced / quality | `flow_preset` | Farneback 金字塔层数与窗口 |
+| 遮挡敏感度 | 0.05–0.60 / 0.20 | `occlusion_sensitivity` | 前后向光流误差的指数衰减系数 |
+| 随机种子 | 0–999999 / 42 | `seed` | 首帧与每帧热启动的噪声 |
+
+视频处理流程：
+
+1. 首帧按普通图片风格迁移，使用更多轮数。
+2. 对后续帧计算当前帧→上一帧的反向 Farneback 光流，以及上一帧→当前帧的前向光流。
+3. 用 `cv2.remap` 把上一帧风格图推到当前帧。
+4. 用前后向光流误差生成置信度掩码：`mask = exp(-k × ||flow_bw + warped_flow_fw||)`。
+5. 非遮挡区用上一帧笔触、遮挡区用当前内容帧做 95% 热启动。
+6. 增加时间损失 `temporal_weight × mean(mask × (X - warped_previous)²)`，再做少量 L-BFGS 优化。
+
+默认 36 帧 / 480px 约需 1.5–2 分钟（RTX 5060 Laptop）。先用首帧预览，再降低帧数或 360px 试参数。
+
 ### 环境自检
 
 ```bash
 python scripts/check_env.py
 ```
 
-会输出 Python、torch、torchvision、Streamlit、CUDA、GPU、VGG19 缓存和示例素材状态，
+会输出 Python、torch、torchvision、Streamlit、OpenCV、ffmpeg、CUDA、GPU、VGG19 缓存和示例素材状态，
 方便排查环境问题。
 
 ## 滑块与内部参数
@@ -175,6 +212,30 @@ relu1_1  relu2_1  relu3_1  relu4_1  relu5_1
 这是原始的优化式风格迁移：每张输出都需要单独优化，不是前馈风格化网络，因此耗时是秒级
 而不是毫秒级。
 
+### 视频时序算法
+
+对 `t > 0` 的帧，设上一帧风格化结果为 `S_{t-1}`，当前内容帧为 `C_t`：
+
+```text
+flow_bw  = Farneback(C_t → C_{t-1})
+warped   = remap(S_{t-1}, flow_bw)
+flow_fw  = Farneback(C_{t-1} → C_t)
+diff     = ||flow_bw + remap(flow_fw, flow_bw)||
+mask     = exp(-occlusion_sensitivity × diff)
+
+init_t   = 0.95 × (mask × warped + (1 - mask) × C_t) + 0.05 × noise
+
+L_temporal = temporal_weight × mean(mask × (X_t - warped)²)
+L_total    = L_content + L_style + L_TV + L_temporal
+```
+
+前后向光流误差大的区域通常是新暴露背景或遮挡边缘，掩码会降低这些区域的时间约束，
+避免把上一帧的笔触强行贴到当前帧。首帧使用普通图片初始化（`0.7 × 内容 + 0.3 × 噪声`）
+并跑更多轮；后续帧用光流热启动并只做少量优化。
+
+视频通过 imageio-ffmpeg 编码为 H.264/yuv420p MP4；ffmpeg 不可用时回退到 OpenCV `mp4v`。
+输出暂不包含音轨。
+
 ## 复现与性能
 
 ### 已验证环境
@@ -187,6 +248,8 @@ relu1_1  relu2_1  relu3_1  relu4_1  relu5_1
 | torchvision | 0.26.0+cu128 |
 | Streamlit | 1.45.1 |
 | Pillow | 11.1.0 |
+| OpenCV | 5.0.0（headless） |
+| imageio-ffmpeg | 0.8.1 |
 | GPU | NVIDIA GeForce RTX 5060 Laptop，8GB |
 
 CI 使用 Python 3.10 / 3.12 和 CPU 版 PyTorch；无 GPU 也可以运行。
@@ -195,12 +258,14 @@ CI 使用 Python 3.10 / 3.12 和 CPU 版 PyTorch；无 GPU 也可以运行。
 
 | 配置 | 耗时 |
 | --- | --- |
-| 10 轮 / 384px | 约 3 秒 |
-| 15 轮 / 512px（方图） | 约 10 秒 |
-| 40 轮 / 512px（方图） | 约 27 秒 |
-| 40 轮 / 512px（竖图 288×512） | 约 18 秒 |
+| 图片：10 轮 / 384px | 约 3 秒 |
+| 图片：15 轮 / 512px（方图） | 约 10 秒 |
+| 图片：40 轮 / 512px（方图） | 约 27 秒 |
+| 图片：40 轮 / 512px（竖图 288×512） | 约 18 秒 |
+| 视频：6 帧 / 480px，首帧 35 轮 + 后续 8 轮 | 约 26 秒 |
+| 视频：36 帧 / 480px，默认参数 | 约 1.5–2 分钟（估算） |
 
-CPU 会慢很多（40 轮可能需要数分钟），建议先降分辨率或减少轮数。
+CPU 会慢很多（图片 40 轮可能需要数分钟；视频基本不适合 CPU）。建议先降分辨率、帧数或轮数。
 
 ### 关于确定性
 
@@ -213,18 +278,20 @@ VGG19 权重通过 torchvision 的 `VGG19_Weights.DEFAULT` 获取，缓存在标
 
 ```text
 neural-style-studio/
-├─ app.py                      # Streamlit 界面、滑块、预设、结果展示
-├─ style_transfer.py           # 独立的 VGG19 + L-BFGS 引擎
+├─ app.py                      # 页面导航 + 图片页
+├─ ui_video.py                 # 视频页：光流、首帧预览、结果展示
+├─ engine_cache.py             # 共享的 VGG19 引擎缓存
+├─ style_transfer.py           # 独立的图片 + 视频风格迁移引擎
 ├─ assets/
 │  ├─ demo_content.png         # NASA 宇航员，公有领域
 │  ├─ demo_style.png           # 梵高，公有领域
 │  └─ CREDITS.md
 ├─ scripts/
-│  ├─ stylize.py               # 无头 CLI
+│  ├─ stylize.py               # 无头图片 CLI
 │  ├─ check_env.py             # 环境自检
 │  └─ make_docs_assets.py      # 重新生成 README 图片
-├─ tests/                      # pytest 测试
-├─ docs/images/                # README 图片
+├─ tests/                      # 图片、视频、UI 渲染测试
+├─ docs/images/                # README 图片和视频 GIF
 ├─ .github/workflows/ci.yml    # lint + tests + Docker build
 ├─ Dockerfile
 ├─ docker-compose.yml
@@ -242,13 +309,13 @@ pip install -r requirements-dev.txt
 pytest -q          # 快速测试，不下载模型
 ruff check .       # 代码检查
 
-# 真实引擎冒烟测试（会加载 VGG19 并跑 1 轮优化）
+# 真实引擎冒烟测试（图片 + 视频，会加载 VGG19）
 # Windows PowerShell:
 $env:RUN_ENGINE_TESTS = "1"; pytest -q
 # macOS / Linux:
 RUN_ENGINE_TESTS=1 pytest -q
 
-# 重新生成 README 图片（建议使用 GPU）
+# 重新生成 README 图片（建议使用 GPU；视频 GIF 需另从测试输出生成）
 python scripts/make_docs_assets.py
 ```
 
@@ -264,7 +331,25 @@ VGG19 权重约 548MB，首次需要下载。也可以手动下载 `vgg19-dcbb9e
 `~/.cache/torch/hub/checkpoints/`。
 
 **CUDA 显存不足**
-把输出长边降到 384px、减少迭代轮数，或关闭其他占用 GPU 的程序。
+图片把输出长边降到 384px；视频把长边降到 360px、减少最大帧数或后续帧轮数，或关闭其他占用 GPU 的程序。
+
+**视频页提示缺少 OpenCV**
+安装视频依赖：
+
+```bash
+pip install -r requirements.txt
+# 或：pip install opencv-python-headless imageio-ffmpeg
+```
+
+**浏览器无法播放生成的视频**
+优先输出 H.264 MP4。如果环境回退到 OpenCV `mp4v`，页面会提示；可以下载后用 VLC 等播放器查看。
+
+**视频生成很慢**
+这是正常的：每一帧都要单独优化。先用「预览首帧」，再降低最大帧数、视频长边或后续帧轮数。
+CPU 上视频基本只适合几帧的试验。
+
+**输出视频没有声音**
+目前不做音轨合并，输出是无声视频；需要时可在生成后用 ffmpeg 合并原音频。
 
 **8501 端口被占用**
 
@@ -281,7 +366,7 @@ streamlit run app.py --server.port 8502
 - 代码：[MIT](LICENSE)
 - 示例内容图：NASA 宇航员肖像，公有领域
 - 示例风格图：梵高《麦田与柏树》，1889，公有领域
-- README 图片由上述素材生成
+- README 图片和视频 GIF 由上述素材生成
 - 详见 [assets/CREDITS.md](assets/CREDITS.md)；示例素材不适用 MIT 协议
 
 算法参考 d2l 的 Style Transfer notebook 以及：

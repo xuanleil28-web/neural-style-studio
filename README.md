@@ -5,10 +5,11 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.45%2B-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**An interactive, reproducible neural style transfer app.** Upload a content photo and a
-style painting, tune the color and brushstroke parameters with sliders, and download the
-stylized result. Built with VGG19, Gram matrices, and L-BFGS — packaged from a course
-notebook into a small application that other people can run.
+**An interactive, reproducible neural style transfer app for images and short videos.**
+Upload a content photo or a video and a style painting, tune color and brushstroke
+parameters with sliders, and download the stylized result. Images use VGG19 + Gram
+matrices + L-BFGS. Video adds Farneback optical flow, occlusion-aware warping, and a
+temporal consistency loss to suppress flicker.
 
 [中文说明](README.zh-CN.md)
 
@@ -26,11 +27,14 @@ makes it:
 
 - **Interactive** — every important loss weight and input scale is a slider.
 - **Inspectable** — the engine is a standalone Python module, not buried in UI code.
+- **Temporal-aware** — video mode aligns frames with optical flow and penalizes flicker.
 - **Reproducible** — fixed seed, documented defaults, tested environment, and a CLI.
 - **Portable** — runs locally, in Docker, or on CPU; no `d2l` or `matplotlib` dependency.
 - **Reusable** — the demo images are public domain, and the code is MIT licensed.
 
 ## Features
+
+**Image page**
 
 - Upload content/style images (PNG, JPG, JPEG, WEBP, BMP); transparent images are
   composited on white.
@@ -39,9 +43,24 @@ makes it:
 - 4 one-click presets: Van Gogh impasto, color burst, fine brush, and quick preview.
 - Live progress, intermediate previews, final loss chart, and parameter report.
 - Download the result as PNG.
+
+**Video page**
+
+- Upload MP4/MOV/M4V/AVI/MKV/WEBM and a style image.
+- Farneback forward/backward optical flow with a confidence mask for disocclusions.
+- Temporal consistency loss plus optical-flow warm start between frames.
+- Separate knobs for first-frame rounds, per-frame rounds, temporal weight, max frames,
+  video resolution, and flow quality.
+- **First-frame preview** before committing to a long video run.
+- H.264 MP4 output (via bundled `imageio-ffmpeg`) for in-browser playback; falls back to
+  OpenCV `mp4v` if ffmpeg is unavailable.
+- Output is silent (audio is not muxed yet).
+
+**General**
+
 - Automatic CUDA acceleration; CPU fallback with a warning.
-- Headless CLI and Docker support.
-- Unit tests plus an optional real-engine smoke test.
+- Headless CLI for images and Docker support.
+- Unit tests plus optional real image/video engine smoke tests.
 - GitHub Actions CI for lint, tests, and Docker build.
 
 ## Quick start
@@ -50,6 +69,7 @@ makes it:
 
 - Python 3.10 or newer
 - PyTorch 2.0+ and torchvision 0.15+
+- OpenCV 4.8+ and imageio-ffmpeg 0.5+ (installed by `requirements.txt`)
 - Optional: an NVIDIA GPU with a CUDA-enabled PyTorch build
 - ~600 MB free disk space for the VGG19 weights on first run
 
@@ -104,7 +124,7 @@ docker run --rm -p 8501:8501 \
 
 The Docker image installs CPU-only PyTorch to keep it smaller. For GPU inference,
 install a CUDA-enabled PyTorch locally (or adapt the base image and install the matching
-CUDA wheel). CPU inference works but is significantly slower.
+CUDA wheel). CPU inference works but is significantly slower, especially for video.
 
 ### CLI
 
@@ -123,14 +143,49 @@ python scripts/stylize.py --device cpu --steps 5 --size 256
 
 Run `python scripts/stylize.py --help` for all options.
 
+### Video mode
+
+Open the **视频风格化 / Video Style Transfer** page from the sidebar. Upload a video,
+optionally upload a style image (the built-in Van Gogh demo is used otherwise), click
+**预览首帧 / Preview first frame** to check the look, then **生成风格化视频 / Generate video**.
+
+![Video style transfer demo](docs/images/video_demo.gif)
+
+The demo GIF above is a short synthetic pan generated with the same pipeline (6 frames,
+480 px, 35 first-frame rounds + 8 rounds/frame). Video output is H.264 MP4 and plays in
+the browser; audio is not preserved.
+
+| UI label | English | Range / default | Engine parameter | Effect |
+| --- | --- | --- | --- | --- |
+| 首帧轮数 | First-frame rounds | 10–50 / 35 | `first_frame_steps` | More rounds build a stronger initial brushstroke base |
+| 后续帧轮数 | Per-frame rounds | 2–15 / 8 | `frame_steps` | Fewer rounds are faster; too few may drift from the style |
+| 时间一致性 | Temporal consistency | 0–500 / 200 | `temporal_weight` | Higher suppresses flicker but can add ghosting/trailing |
+| 最大帧数 | Max frames | 8–120 / 36 | `max_frames` | Only the first N frames are processed |
+| 视频长边 | Video long edge | 360 / 480 / 640 | `video_size` | Output resolution; lower is much faster |
+| 光流精度 | Flow quality | fast / balanced / quality | `flow_preset` | Farneback pyramid levels and window size |
+| 遮挡敏感度 | Occlusion sensitivity | 0.05–0.60 / 0.20 | `occlusion_sensitivity` | How quickly temporal locking is dropped at flow disagreements |
+| 随机种子 | Random seed | 0–999999 / 42 | `seed` | Noise initialization for the first frame and each warm start |
+
+The first frame runs the normal image optimization. Every later frame:
+
+1. computes backward and forward Farneback flow,
+2. warps the previous stylized frame with `cv2.remap`,
+3. builds `mask = exp(-k × ||flow_bw + warped_flow_fw||)` to down-weight occlusions,
+4. blends `mask × warped_previous + (1 - mask) × current_content` as the warm start,
+5. optimizes with the extra loss `temporal_weight × mean(mask × (X - warped_previous)²)`.
+
+Video processing is expensive: the default 36 frames at 480 px take roughly 1.5–2 minutes
+on the reference GPU. Start with **Preview first frame**, then use fewer frames or 360 px
+while iterating.
+
 ### Check your environment
 
 ```bash
 python scripts/check_env.py
 ```
 
-It prints Python, torch, torchvision, Streamlit, CUDA availability, GPU name, and
-whether the VGG19 checkpoint and demo assets are present.
+It prints Python, torch, torchvision, Streamlit, OpenCV, ffmpeg, CUDA availability, GPU
+name, and whether the VGG19 checkpoint and demo assets are present.
 
 ## What the sliders do
 
@@ -205,6 +260,32 @@ This is the original optimization-based style transfer formulation: each output 
 requires its own optimization. It is not a feed-forward stylization network, so generation
 takes seconds rather than milliseconds.
 
+### Video temporal pipeline
+
+For a frame at time `t > 0`, with the previous **stylized** frame `S_{t-1}` and the current
+content frame `C_t`:
+
+```text
+flow_bw  = Farneback(C_t → C_{t-1})
+warped   = remap(S_{t-1}, flow_bw)
+flow_fw  = Farneback(C_{t-1} → C_t)
+diff     = ||flow_bw + remap(flow_fw, flow_bw)||
+mask     = exp(-occlusion_sensitivity × diff)
+
+init_t   = 0.95 × (mask × warped + (1 - mask) × C_t) + 0.05 × noise
+
+L_temporal = temporal_weight × mean(mask × (X_t - warped)²)
+L_total    = L_content + L_style + L_TV + L_temporal
+```
+
+The forward/backward flow consistency flags newly exposed regions (where the previous
+frame has no reliable correspondence), so those pixels are not forced to match the past.
+The first frame uses the normal image initialization (`0.7 × content + 0.3 × noise`) and
+more rounds; later frames use the optical-flow warm start and fewer rounds.
+
+Frames are written as H.264/yuv420p MP4 via `imageio-ffmpeg`; if that encoder is
+unavailable, the engine falls back to OpenCV `mp4v`. The output has no audio track.
+
 ## Reproducibility
 
 ### Tested environment
@@ -217,6 +298,8 @@ takes seconds rather than milliseconds.
 | torchvision | 0.26.0+cu128 |
 | Streamlit | 1.45.1 |
 | Pillow | 11.1.0 |
+| OpenCV | 5.0.0 (headless) |
+| imageio-ffmpeg | 0.8.1 |
 | GPU | NVIDIA GeForce RTX 5060 Laptop, 8 GB |
 
 The code also runs on CPU. CI uses Python 3.10 and 3.12 with CPU PyTorch.
@@ -227,12 +310,15 @@ Approximate timings on the machine above:
 
 | Configuration | Time |
 | --- | --- |
-| 10 rounds, 384 px | ~3 s |
-| 15 rounds, 512 px (square) | ~10 s |
-| 40 rounds, 512 px (square) | ~27 s |
-| 40 rounds, 512 px (portrait 288×512) | ~18 s |
+| Image: 10 rounds, 384 px | ~3 s |
+| Image: 15 rounds, 512 px (square) | ~10 s |
+| Image: 40 rounds, 512 px (square) | ~27 s |
+| Image: 40 rounds, 512 px (portrait 288×512) | ~18 s |
+| Video: 6 frames, 480 px, 35 + 8 rounds/frame | ~26 s |
+| Video: 36 frames, 480 px, default settings | ~1.5–2 min (estimated) |
 
-CPU inference is much slower (minutes for 40 rounds). Reduce rounds or resolution first.
+CPU inference is much slower (minutes for 40 image rounds; video is impractical).
+Reduce rounds, resolution, or frame count first.
 
 ### Determinism
 
@@ -247,18 +333,20 @@ downloaded to the standard torch cache directory.
 
 ```text
 neural-style-studio/
-├─ app.py                      # Streamlit UI, sliders, presets, result rendering
-├─ style_transfer.py           # Standalone VGG19 + L-BFGS engine
+├─ app.py                      # Navigation + image page
+├─ ui_video.py                 # Video page: optical flow, preview, result UI
+├─ engine_cache.py             # Shared cached VGG19 engine
+├─ style_transfer.py           # VGG19 + L-BFGS engine (image + video)
 ├─ assets/
 │  ├─ demo_content.png         # NASA astronaut, public domain
 │  ├─ demo_style.png           # Van Gogh, public domain
 │  └─ CREDITS.md
 ├─ scripts/
-│  ├─ stylize.py               # Headless CLI
+│  ├─ stylize.py               # Headless image CLI
 │  ├─ check_env.py             # Environment diagnostic
 │  └─ make_docs_assets.py      # Regenerates README images
-├─ tests/                      # pytest suite
-├─ docs/images/                # README images
+├─ tests/                      # pytest suite (image, video, UI render)
+├─ docs/images/                # README images and video GIF
 ├─ .github/workflows/ci.yml    # lint + tests + Docker build
 ├─ Dockerfile
 ├─ docker-compose.yml
@@ -276,13 +364,13 @@ pip install -r requirements-dev.txt
 pytest -q          # fast tests, skips the model download
 ruff check .       # lint
 
-# Real engine smoke test (loads VGG19, runs one optimization round)
+# Real engine smoke tests (image + short optical-flow video; loads VGG19)
 # Windows PowerShell:
 $env:RUN_ENGINE_TESTS = "1"; pytest -q
 # macOS/Linux:
 RUN_ENGINE_TESTS=1 pytest -q
 
-# Regenerate README images (GPU recommended)
+# Regenerate README still images (GPU recommended; video GIF is generated separately)
 python scripts/make_docs_assets.py
 ```
 
@@ -300,8 +388,29 @@ network cannot reach PyTorch's servers, download `vgg19-dcbb9e9d.pth` manually a
 it in `~/.cache/torch/hub/checkpoints/`.
 
 **CUDA out of memory**
-Lower the output long edge to 384 px, reduce rounds, or close other GPU processes. The
-error dialog also suggests this.
+Lower the output long edge (384 px for images, 360 px for video), reduce rounds/frames,
+or close other GPU processes. The error dialog also suggests this.
+
+**Video mode says OpenCV is missing**
+Install the video dependencies:
+
+```bash
+pip install -r requirements.txt
+# or: pip install opencv-python-headless imageio-ffmpeg
+```
+
+**The generated video does not play in the browser**
+The preferred output is H.264 MP4. If the environment fell back to OpenCV `mp4v`, the
+page shows a warning; download the file and open it in VLC/ffmpeg-based players.
+
+**Video generation is very slow**
+This is expected: each frame is optimized separately. Use **Preview first frame**, reduce
+`最大帧数`, lower the video long edge, or reduce the per-frame rounds. CPU video is
+impractical for anything beyond a few frames.
+
+**The output video has no audio**
+Audio muxing is not implemented yet; the video is intentionally silent. Add an ffmpeg mux
+step after generation if you need the original soundtrack.
 
 **Port 8501 is already in use**
 Use another port:
@@ -324,7 +433,7 @@ reuse Docker layer cache.
 - Code: [MIT](LICENSE).
 - Demo content: NASA astronaut portrait, public domain.
 - Demo style: Vincent van Gogh, *Wheat Field with Cypresses*, 1889, public domain.
-- Documentation images are generated from those assets.
+- Documentation images and the video demo GIF are generated from those assets.
 - See [assets/CREDITS.md](assets/CREDITS.md) for details. The demo images are not
   covered by the MIT license.
 
